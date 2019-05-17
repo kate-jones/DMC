@@ -6,7 +6,7 @@ import datetime
 Parse in a site's NWISWeb measurement table using requests and BeautifulSoup. 
 '''
 
-station = '09234500'
+station = '09302000'
 
 mmts_url = f'https://waterdata.usgs.gov/ut/nwis/measurements/?site_no={station}&agency_cd=USGS'
 mmts_page = requests.get(mmts_url)
@@ -22,11 +22,18 @@ mmts = mmts_soup.find_all("tr", align="right")
 for mmt in mmts:
   mmt_num = mmt.find_all("td")[0].get_text()
   mmt_datetime = mmt.find_all("td")[1].get_text()
+  #print(mmt_datetime)
   mmt_d = mmt_datetime[0:10] #Can replace indexing with a regex method to ensure dates and times get detected correctly.
+  #print(mmt_d)
   mmt_d_dt = datetime.datetime.strptime(mmt_d, '%Y-%m-%d')
+  #print(mmt_d_dt)
   d = datetime.datetime.now() - datetime.timedelta(days=120)
   if mmt_d_dt > d:
-    mmt_datetime_dt = datetime.datetime.strptime(mmt_datetime, '%Y-%m-%d %H:%M:%S')
+    try:
+      mmt_datetime_dt = datetime.datetime.strptime(mmt_datetime, '%Y-%m-%d %H:%M:%S')
+    except:
+      mmt_datetime_dt = datetime.datetime.strptime(mmt_datetime, '%Y-%m-%d %H:%M')
+    #print(mmt_datetime_dt)
     q = mmt.find_all("td")[6].get_text()
     recent_mmts.update({mmt_num: [mmt_d, mmt_datetime_dt, q]})
     
@@ -41,7 +48,7 @@ messages = []
 
 for mmt in recent_mmts.keys():
   mmt_date = recent_mmts[mmt][0]
-  iv_url = f'https://waterdata.usgs.gov/ut/nwis/uv?cb_00010=on&cb_00060=on&cb_00065=on&format=html&site_no=09234500&period=&begin_date={mmt_date}&end_date={mmt_date}'
+  iv_url = f'https://waterdata.usgs.gov/ut/nwis/uv?cb_00010=on&cb_00060=on&cb_00065=on&format=html&site_no={station}&period=&begin_date={mmt_date}&end_date={mmt_date}'
   iv_page = requests.get(iv_url)
   iv_soup = BeautifulSoup(iv_page.text, 'html.parser')
 
@@ -63,9 +70,17 @@ for mmt in recent_mmts.keys():
 
 
   nearest_iv_q = iv_items[nearest_time]
+  print(nearest_iv_q)
   q = recent_mmts[mmt][2]
-  diff = int(nearest_iv_q.replace(',', '')) - int(q)
-  lesser_q = min(int(nearest_iv_q.replace(',', '')), int(q))
+  print(q)
+  try:
+    diff = int(nearest_iv_q.replace(',', '')) - int(q)
+  except:
+    diff = float(nearest_iv_q) - float(q)
+  try:
+    lesser_q = min(int(nearest_iv_q.replace(',', '')), int(q))
+  except:
+    lesser_q = min(float(nearest_iv_q), float(q))
 
   if diff/lesser_q > 0.05*lesser_q:
     messages.append(f"Shift not applied for measurement {mmt} made on {mmt_date}.")
