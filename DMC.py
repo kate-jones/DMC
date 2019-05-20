@@ -6,7 +6,7 @@ import datetime
 Parse in a site's NWISWeb measurement table using requests and BeautifulSoup. 
 '''
 
-station = '09302000'
+station = '09261700'
 
 mmts_url = f'https://waterdata.usgs.gov/ut/nwis/measurements/?site_no={station}&agency_cd=USGS'
 mmts_page = requests.get(mmts_url)
@@ -22,18 +22,14 @@ mmts = mmts_soup.find_all("tr", align="right")
 for mmt in mmts:
   mmt_num = mmt.find_all("td")[0].get_text()
   mmt_datetime = mmt.find_all("td")[1].get_text()
-  #print(mmt_datetime)
   mmt_d = mmt_datetime[0:10] #Can replace indexing with a regex method to ensure dates and times get detected correctly.
-  #print(mmt_d)
   mmt_d_dt = datetime.datetime.strptime(mmt_d, '%Y-%m-%d')
-  #print(mmt_d_dt)
   d = datetime.datetime.now() - datetime.timedelta(days=120)
   if mmt_d_dt > d:
     try:
       mmt_datetime_dt = datetime.datetime.strptime(mmt_datetime, '%Y-%m-%d %H:%M:%S')
     except:
       mmt_datetime_dt = datetime.datetime.strptime(mmt_datetime, '%Y-%m-%d %H:%M')
-    #print(mmt_datetime_dt)
     q = mmt.find_all("td")[6].get_text()
     recent_mmts.update({mmt_num: [mmt_d, mmt_datetime_dt, q]})
     
@@ -53,13 +49,19 @@ for mmt in recent_mmts.keys():
   iv_soup = BeautifulSoup(iv_page.text, 'html.parser')
 
   iv_items = {}
+  iv_head = iv_soup.find_all("thead")[1]
+  iv_heads = iv_head.find_all("th")
+  for idx, header in enumerate(iv_heads):
+    if "ft3/s" in header.get_text():
+      q_idx = idx
+      break
   iv_table = iv_soup.find_all("tbody")[1]
   iv_rows = iv_table.find_all("tr", align="center")
   for row in iv_rows:
     iv_date_time = row.find_all("td")[0].get_text()
     iv_date_time_fmt = iv_date_time[1:17]
     iv_date_time_dt = datetime.datetime.strptime(iv_date_time_fmt, '%m/%d/%Y %H:%M')
-    iv_q = row.find_all("td")[2] #This index will not be the same for every site.
+    iv_q = row.find_all("td")[q_idx]
     iv_q_val = iv_q.find_all("span")[0].get_text()
     if iv_q_val != '\xa0':
       iv_items.update({iv_date_time_dt: iv_q_val})
