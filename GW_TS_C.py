@@ -1,81 +1,58 @@
 import requests
-from bs4 import BeautifulSoup
+import json
 import datetime
-
-'''
-Parse in a groundwater site's NWISWeb measurement table using requests and BeautifulSoup. 
-'''
-
-station = '393928113522601'
-
-mmts_url = f'https://nwis.waterdata.usgs.gov/nwis/gwlevels?site_no={station}&agency_cd=USGS&format=html'
-mmts_page = requests.get(mmts_url)
-mmts_soup = BeautifulSoup(mmts_page.text, 'html.parser')
+import dateutil.parser
 
 
 '''
-Save a recent_mmts dict with {date string: [datetime object, value]} pairs for measurements within 120 days of current date.
-'''
-
-recent_mmts = {}
-mmts = mmts_soup.find_all("tr", align="right")
-
-for mmt in mmts:
-  mmt_d = mmt.find_all("td")[0].get_text()
-  mmt_t = mmt.find_all("td")[1].get_text() 
-  mmt_d_dt = datetime.datetime.strptime(mmt_d, '%Y-%m-%d')
-  d = datetime.datetime.now() - datetime.timedelta(days=120)
-  if mmt_d_dt > d:
-    wl = mmt.find_all("td")[3].get_text()
-    recent_mmts.update({mmt_d: [mmt_t, wl]})
-    print(f"A water level depth of {wl} was measured on {mmt_d} at {mmt_t}.")
-  
-
-'''
-For each recent measurement, parse in NWISWeb iv table for date of mmt using requests and BeautifulSoup. 
-Save an iv_items dict with time:wl pairs.
-Determine iv closest to time of mmt and save to var nearest_time. 
-Determine time series wl value for closest iv. Calculate difference from mmt value and issue a warning if plots out of range. 
+Parse in a dict of groundwater site's measurements for the last 120 days using requests and json libraries and convert to list. Each mmt is one dictionary in list: [{'value': <str>, 'qualifiers': [], 'dateTime': <str>},]
 '''
 
 messages = []
+station = '393928113522601'
+end_date = datetime.date.today()
+end_date_iso = end_date.isoformat()
+start_date = datetime.date.today() - datetime.timedelta(days=120)
+start_date_iso = start_date.isoformat()
+wls = requests.get(f'https://waterservices.usgs.gov/nwis/gwlevels/?format=json&sites={station}&startDT={start_date_iso}&endDT={end_date_iso}&siteStatus=all')
+wls_dict = json.loads(wls.text)
+#wls_str = json.dumps(wls_dict, indent=4)  # For debug purposes.
 
-for mmt_date in recent_mmts.keys():
-  iv_url = f'https://waterdata.usgs.gov/nwis/uv?cb_72019=on&format=html&site_no={station}&period=&begin_date={mmt_date}&end_date={mmt_date}'
+wls_list = wls_dict['value']['timeSeries'][0]['values'][0]['value']
+
+'''
+For each recent measurement, parse dict of iv's for date of mmt using requests and json libraries and convert to list. Each iv is one dictionary in list: [{'value': <str>, 'qualifiers': [], 'dateTime': <str>},]
+Determine closest iv's before and after time of mmt and save to list/dict nearest_times. 
+Determine time series wl value for closest iv. Calculate difference from mmt value and issue a warning if plots out of range. 
+'''
+
+for i, mmt in enumerate(wls_list):
+
+  mmt_datetime_iso = mmt['dateTime']  # Type string
+  mmt_datetime_obj = dateutil.parser.parse(mmt_datetime_iso)  # Type datetime obj
+  mmt_date_iso = mmt_datetime_iso[:10]  # Type string
+  mmt_wl = mmt['value']
+  iv_url = f'https://nwis.waterservices.usgs.gov/nwis/iv/?format=json&sites={station}&startDT={mmt_date_iso}&endDT={mmt_date_iso}&siteStatus=all'
   iv_page = requests.get(iv_url)
-  iv_soup = BeautifulSoup(iv_page.text, 'html.parser')
+  iv_dict = json.loads(iv_page.text)
+  #iv_str = json.dumps(iv_dict, indent=4)  # For debug purposes.
 
-  iv_items = {}
+  iv_list = iv_dict['value']['timeSeries'][0]['values'][0]['value']
 
-  iv_table = iv_soup.find_all("tbody")[2]
-  iv_rows = iv_table.find_all("tr", align="center")
-  for row in iv_rows:
-    iv_time = row.find_all("td")[0].get_text()
+  nearest = {}  #{'before': [datetime_iso, datetime_obj, wl], 'after': [datetime_iso, datetime_obj, wl]}
 
-    iv_time_fmt = iv_time[0:5]
-    iv_date_time_fmt = f"{mmt_date} {iv_time_fmt}"
-    iv_date_time_dt = datetime.datetime.strptime(iv_date_time_fmt, '%Y-%m-%d %H:%M')
-    iv_wl = row.find_all("td")[1]
-    iv_wl_val = iv_wl.find_all("span")[0].get_text()
-    if iv_wl_val != '\xa0':
-      iv_items.update({iv_date_time_dt: iv_wl_val})
+  for i, iv in enumerate(iv_list):
+    iv_datetime_obj = dateutil.parser.parse(iv['dateTime'])
+    iv_datetime_obj_naive = iv_datetime_obj.replace(tzinfo=None)
+    if iv_datetime_obj_naive > mmt_datetime_obj:
+      nearest.update({'after': [iv_datetime_obj_naive, iv['dateTime'], iv['value']]})
+      nearest.update({'before': [dateutil.parser.parse(iv_list[i-1]['dateTime']).replace(tzinfo=None), iv_list[i-1]['dateTime'], iv_list[i-1]['value']]})
+      break
 
-  mmt_date_time_fmt = f"{mmt_date} {recent_mmts[mmt_date][0][0:5]}"
-  print(mmt_date_time_fmt)
-  mmt_date_time_dt = datetime.datetime.strptime(mmt_date_time_fmt, '%Y-%m-%d %H:%M')
-  nearest_time = min(iv_items, key=lambda x: abs(x - mmt_date_time_dt))
-  print(nearest_time)
-
-  nearest_iv_wl = iv_items[nearest_time]
-  print(nearest_iv_wl)
-
-  wl = recent_mmts[mmt_date][1]
-  print(wl)
-
-  if abs(float(nearest_iv_wl) - float(wl)) > 0.02:
-    messages.append(f"Time series not corrected for discrete water level measured on {mmt_date}.")
+  if abs(float(mmt_wl) - float(nearest['after'][2])) > 0.02:
+    messages.append(f"Time series not corrected for discrete water level measured on {mmt_date_iso}.")
   else:
-    messages.append(f"Water level measured on {mmt_date} plots within error of corrected time series.")
+    messages.append(f"Water level measured on {mmt_date_iso} plots within error of corrected time series.")
 
 print(f'\nFor Station {station}:\n')
 for message in messages:
