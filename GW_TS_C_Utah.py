@@ -6,6 +6,9 @@ import dateutil.parser
 
 '''
 Define variables for url parsing.
+stations_list: List of stations for one WSC
+end_date_iso: Today's date for end of analysis period
+start_date_iso: 120 days ago for start of analysis period
 '''
 
 stations_list = ['373830109283201', '375050109034801', '390925111455301', '393928113522601', '402312109545701', '414236112101201'] # List from https://groundwaterwatch.usgs.gov/NetMapT1L2.asp?sc=49&ncd=rtn
@@ -16,19 +19,30 @@ end_time = datetime.datetime.now().time().strftime('%H:%M')
 start_date = datetime.date.today() - datetime.timedelta(days=120)
 start_date_iso = start_date.isoformat()
 
+'''
+Create log file and start console output.
+f logs output for visual purposes
+g logs json data of core variables for updating web table
+h parses in yesterday's json log file for viewing new changes
+'''
+
 print('----------------------------------------')
 print(f'Results on {end_date_iso} at {end_time}:\n\n')
 
-'''
-Create log file.
-'''
+#f = open("GW_TS_C_JSON_Utah_display.txt", "a")
+g = open(f"GW_TS_C_JSON_Utah_data_{end_date_iso}.json", "w")
 
-f = open("GW_TS_C_JSON_Utah_logs.txt", "a")
-f.write('\n----------------------------------------')
-f.write(f'\nResults on {end_date_iso} at {end_time}:\n\n')
+#f.write('\n----------------------------------------')
+#f.write(f'\nResults on {end_date_iso} at {end_time}:\n\n')  # May want to move this to bottom so that end_time is after evaluation not at start of evaluation
 
 '''
-Define counter variables for table outputs. 
+Define counter variables for table output. 
+flags: int, Number of water level measurements that plot off of time series
+observations: int, Number of water level measurements made by WSC in 120-day period
+sites: int, Number of sites managed by WSC
+sites_obs: int, Number of sites visited by WSC in 120-day period
+days_since_last = list of ints, Days since last observation at each site, for computing mean
+diffs: list of floats, Difference between observed water level and time series value for each observation
 '''
 
 flags = 0
@@ -41,7 +55,9 @@ diffs = []
 for station in stations_list:
 
   '''
-  Parse in a dict of groundwater site's measurements for the last 120 days using requests and json libraries and convert to list. Each recent mmt is one dictionary in list: [{'value': <str>, 'qualifiers': [], 'dateTime': <str>},]
+  Parse in a dict of groundwater site's measurements for the last 120 days for each site using requests and json libraries and convert to list. Each recent mmt is one dictionary in wls_list: [{'value': <str>, 'qualifiers': [], 'dateTime': <str>},].
+  sites_obs gets updated if site was visited at least once.
+  days_since_last list gets appended for each site
   '''
 
   messages = []
@@ -65,7 +81,7 @@ for station in stations_list:
   days_since_last.append(int((datetime.datetime.now().date() - last_wl_date_obj)/ datetime.timedelta(days=1)))
 
   '''
-  For each recent measurement, parse dict of iv's for date of mmt using requests and json libraries and convert to list. Each iv is one dictionary in list: [{'value': <str>, 'qualifiers': [], 'dateTime': <str>},]
+  For each recent measurement, parse dict of iv's for date of mmt using requests and json libraries and convert to list. Each iv is one dictionary in iv_list: [{'value': <str>, 'qualifiers': [], 'dateTime': <str>},].
   Determine closest iv times before and after time of mmt and save to dict nearest. 
   Determine time series wl value for closest iv time. Calculate difference from mmt value and issue a warning if plots out of range. 
   '''
@@ -106,22 +122,30 @@ for station in stations_list:
       messages.append(f'A measurement was made on {mmt_date_iso} but no time series data exists for this date.')
       observations += 1
 
-
+  '''
+  Console output and file write output
+  '''
 
   print(f'\nFor Station {station}:\n')
   for message in messages:
     print(f"{message}\n")
 
-  '''
-  Write results to a file.
-  '''
-
   #f.write(f'\nFor Station {station}:\n')
   #for message in messages:
     #f.write(f'{message}\n')
 
+'''
+Define post-processing variables for table output, print to console, and write to file.
+percent_flagged: float, Percent of observations made by WSC in last 120 days that did not plot within error
+mean_obs: float, Mean number of observations made at each site
+mean_days_since_last: int
+max_days_since_last: int
+max_diff: float
+mean_diff: float
+'''
+
 percent_flagged = round(flags/observations, 1)
-mean_obs = round(observations/sites, 1)
+mean_obs = round(observations/sites, 1)  # Is it important that this be number of visits vs number of observations?
 mean_days_since_last = int(sum(days_since_last)/len(days_since_last))
 max_days_since_last = max(days_since_last)
 max_diff = round(max(diffs), 2)
@@ -129,6 +153,7 @@ abs_diffs = []
 for diff in diffs:
   abs_diffs.append(abs(diff))
 mean_diff = round(sum(abs_diffs)/len(diffs), 3)
+
 print(f'Total water level observations flagged with issues: {flags}')
 print(f'Total water level observations made: {observations}')
 print(f'Percent water level observations flagged with issues: {percent_flagged}')
@@ -140,15 +165,40 @@ print(f'Max number of days since last observation at real-time stations: {max_da
 print(f'Max time series difference from observed water level: {max_diff}')
 print(f'Mean time series difference from observed water level: {mean_diff}')
 
-f.write(f'''\n\nFor sites in the state of Utah:
-Total water level observations flagged with issues: {flags}
-Total water level observations made: {observations}
-Percent water level observations flagged with issues: {percent_flagged}
-Total stations with water level observations made: {sites_obs}
-Total number of real-time water level stations: {sites}
-Mean water level observations per real-time station: {mean_obs}
-Mean number of days since last observation at real-time stations: {mean_days_since_last}
-Max number of days since last observation at real-time stations: {max_days_since_last}
-Max time series difference from observed water level: {max_diff}
-Mean time series difference from observed water level: {mean_diff}''')
-f.close()
+#f.write(f'''\n\nFor sites in the state of Utah:
+#Total water level observations flagged with issues: {flags}
+#Total water level observations made: {observations}
+#Percent water level observations flagged with issues: {percent_flagged}
+#Total stations with water level observations made: {sites_obs}
+#Total number of real-time water level stations: {sites}
+#Mean water level observations per real-time station: {mean_obs}
+#Mean number of days since last observation at real-time stations: {mean_days_since_last}
+#Max number of days since last observation at real-time stations: {max_days_since_last}
+#Max time series difference from observed water level: {max_diff}
+#Mean time series difference from observed water level: {mean_diff}''')
+
+'''
+Build a dictionary with format "column_title": column_value and write to json file g.
+Compare to yesterday's json file and compute comparison parameters for table output.
+flags_change: int, Change in number of flagged water level observations as compared to yesterday.
+'''
+
+latency = {'Total water level observations flagged with issues': flags, 'Total water level observations made': observations, 'Percent water level observations flagged with issues': percent_flagged, 'Total stations with water level observations made': sites_obs, 'Total number of real-time water level stations': sites, 'Mean water level observations per real-time station': mean_obs, 'Mean number of days since last observation at real-time stations': mean_days_since_last, 'Max number of days since last observation at real-time stations': max_days_since_last, 'Max time series difference from observed water level': max_diff, 'Mean time series difference from observed water level': mean_diff}
+json.dump(latency, g)
+g.close()
+
+yesterday_iso = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+try:
+  with open(f"GW_TS_C_JSON_Utah_data_{yesterday_iso}.json", "r") as h:
+    yesterday = json.load(h)
+    flags_change = latency['Total water level observations flagged with issues'] - yesterday['Total water level observations flagged with issues']
+    latency.update({'Change in number of water level observations flagged since yesterday': flags_change})
+except:
+  print("Cannot compute latency variables, no file generated yesterday")
+
+
+g = open(f"GW_TS_C_JSON_Utah_data_{end_date_iso}.json", "w")
+json.dump(latency, g)
+
+#f.close()
+g.close()
