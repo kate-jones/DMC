@@ -1,3 +1,11 @@
+install_requires=[
+   'requests',
+   'json',
+   'datetime',
+   'dateutil.parser'
+]
+
+
 import requests
 import json
 import datetime
